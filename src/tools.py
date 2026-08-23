@@ -41,6 +41,31 @@ def remove_all_group_memberships(client: GraphClient, user_id: str) -> list[str]
     return removed
 
 
+def find_group(client: GraphClient, group_name: str) -> dict:
+    result = client.get("/groups", params={"$filter": f"displayName eq '{group_name}'"})
+    groups = result.get("value", [])
+    if not groups:
+        raise ValueError(f"No group found named {group_name!r}")
+    return groups[0]
+
+
+def list_group_members(client: GraphClient, group_id: str) -> list[dict]:
+    result = client.get(f"/groups/{group_id}/members")
+    return result.get("value", [])
+
+
+def is_group_member(client: GraphClient, user_id: str, group_id: str) -> bool:
+    members = list_group_members(client, group_id)
+    return any(m["id"] == user_id for m in members)
+
+
+def add_group_membership(client: GraphClient, user_id: str, group_id: str) -> None:
+    client.post(
+        f"/groups/{group_id}/members/$ref",
+        {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{user_id}"},
+    )
+
+
 def log_action(action: str, user_id: str, reason: str, actor: str = "plixa-offboarding-agent") -> None:
     os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
     entry = {
