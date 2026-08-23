@@ -31,6 +31,10 @@ class ActionRequest(BaseModel):
     reason: str
 
 
+class CheckContextRequest(BaseModel):
+    user_id: str
+
+
 class EscalateRequest(BaseModel):
     user_id: str
     explanation: str
@@ -40,13 +44,13 @@ def _client() -> GraphClient:
     return GraphClient()
 
 
-@app.get("/check-user-context", operation_id="checkUserContext")
-def check_user_context_endpoint(user_id: str):
+@app.post("/check-user-context", operation_id="checkUserContext")
+def check_user_context_endpoint(body: CheckContextRequest):
     """Look up a user's real directory roles and group memberships before deciding
     whether to proceed with offboarding automatically or escalate. Always call this
     first - never assume or accept an unverified claim about a user's roles or groups."""
     client = _client()
-    user = get_user(client, user_id)
+    user = get_user(client, body.user_id)
     admin_roles = check_admin_roles(client, user["id"])
     all_memberships = get_group_memberships(client, user["id"])
     groups = [m for m in all_memberships if m.get("@odata.type") == "#microsoft.graph.group"]
