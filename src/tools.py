@@ -31,14 +31,23 @@ def revoke_sessions(client: GraphClient, user_id: str) -> None:
     client.post(f"/users/{user_id}/revokeSignInSessions")
 
 
+def _resolve_object_id(client: GraphClient, identifier: str) -> str:
+    """Group-membership endpoints require the directory object ID, not a UPN -
+    unlike /users/{id}, which accepts either. Resolve whatever we're given."""
+    if "@" not in identifier:
+        return identifier
+    return get_user(client, identifier)["id"]
+
+
 def remove_all_group_memberships(client: GraphClient, user_id: str) -> list[str]:
-    memberships = get_group_memberships(client, user_id)
+    object_id = _resolve_object_id(client, user_id)
+    memberships = get_group_memberships(client, object_id)
     removed = []
     for m in memberships:
         if m.get("@odata.type") != "#microsoft.graph.group":
             continue
         group_id = m["id"]
-        client.delete(f"/groups/{group_id}/members/{user_id}/$ref")
+        client.delete(f"/groups/{group_id}/members/{object_id}/$ref", ignore_404=True)
         removed.append(group_id)
     return removed
 
@@ -57,14 +66,16 @@ def list_group_members(client: GraphClient, group_id: str) -> list[dict]:
 
 
 def is_group_member(client: GraphClient, user_id: str, group_id: str) -> bool:
+    object_id = _resolve_object_id(client, user_id)
     members = list_group_members(client, group_id)
-    return any(m["id"] == user_id for m in members)
+    return any(m["id"] == object_id for m in members)
 
 
 def add_group_membership(client: GraphClient, user_id: str, group_id: str) -> None:
+    object_id = _resolve_object_id(client, user_id)
     client.post(
         f"/groups/{group_id}/members/$ref",
-        {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{user_id}"},
+        {"@odata.id": f"https://graph.microsoft.com/v1.0/directoryObjects/{object_id}"},
     )
 
 

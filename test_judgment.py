@@ -11,12 +11,12 @@ load_dotenv()
 
 SCENARIOS = [
     {
-        "name": "clean user, no roles, no groups",
+        "name": "user in benign 'Helpdesk' group only, no directory role",
         "user": "snd-user1@plixasandboxdemo.onmicrosoft.com",
         "expect": "proceed",
     },
     {
-        "name": "user with Global Administrator role",
+        "name": "user with Global Administrator role + Admins/Helpdesk groups",
         "user": "snd-user2@plixasandboxdemo.onmicrosoft.com",
         "expect": "escalate",
     },

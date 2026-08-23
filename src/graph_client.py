@@ -51,7 +51,9 @@ class GraphClient:
         resp.raise_for_status()
         return resp
 
-    def delete(self, path):
+    def delete(self, path, ignore_404=False):
         resp = requests.delete(f"{GRAPH_BASE}{path}", headers=self._headers())
+        if ignore_404 and resp.status_code == 404:
+            return resp
         resp.raise_for_status()
         return resp
