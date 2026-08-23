@@ -10,10 +10,13 @@ sys.path.insert(0, "src")
 
 from graph_client import GraphClient
 from tools import (
+    add_group_membership,
     check_admin_roles,
     disable_account,
+    find_group,
     get_group_memberships,
     get_user,
+    is_group_member,
     log_action,
     remove_all_group_memberships,
     revoke_sessions,
@@ -21,7 +24,12 @@ from tools import (
 
 load_dotenv()
 
-INSTRUCTIONS = """You are the judgment layer for Plixa AI's offboarding automation agent.
+INSTRUCTIONS = """You are Plixa AI's Entra automation agent. You handle two kinds
+of requests: offboarding (an employee has been terminated) and access requests
+(someone needs to be added to a group). First, work out which kind of request
+this is from the message.
+
+--- Offboarding ---
 
 Before making any decision, ALWAYS call checkUserContext first to look up the
 user's real directory roles and group memberships. Never assume, guess, or
@@ -45,10 +53,25 @@ removeGroupMemberships in that order, each with a brief, specific reason for
 the audit log explaining why it's safe to proceed automatically based on what
 checkUserContext showed.
 
-When you decide to escalate, call escalateToHuman with a clear explanation of
-what checkUserContext showed and why it needs human attention.
+--- Access requests ---
 
-Always be conservative - if in doubt, escalate rather than proceed."""
+First check whether the target group's name suggests elevated risk (e.g.,
+anything with "Admin", "Finance", "Payroll", "Executive" in the name) or the
+request is ambiguous about which group is meant. If so, you MUST call
+escalateToHuman and you MUST NOT call requestAccess for that group under any
+circumstances - noting the risk in your reasoning is not enough, the actual
+tool call must be escalateToHuman, never requestAccess, for any group that
+meets this bar.
+
+Only call requestAccess when the target group is a normal, non-sensitive
+group and there is no ambiguity about which group is meant.
+
+--- Both ---
+
+When you decide to escalate (either kind of request), call escalateToHuman
+with a clear explanation of what you found and why it needs human attention.
+
+Always be conservative - if in doubt, escalate rather than act automatically."""
 
 TOOLS = [
     {
@@ -98,6 +121,20 @@ TOOLS = [
                 "reason": {"type": "string"},
             },
             "required": ["user_id", "reason"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "requestAccess",
+        "description": "Add a user to a specific Entra group as part of an approved access request.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "user_id": {"type": "string"},
+                "group_name": {"type": "string"},
+                "reason": {"type": "string"},
+            },
+            "required": ["user_id", "group_name", "reason"],
         },
     },
     {
@@ -152,6 +189,15 @@ def _handle_remove_group_memberships(client, args):
     return {"status": "removed", "groups_removed": len(removed)}
 
 
+def _handle_request_access(client, args):
+    group = find_group(client, args["group_name"])
+    if is_group_member(client, args["user_id"], group["id"]):
+        return {"status": "already_member", "group": args["group_name"]}
+    add_group_membership(client, args["user_id"], group["id"])
+    log_action("add_group_membership", args["user_id"], args["reason"], actor="plixa-judgment-agent")
+    return {"status": "added", "group": args["group_name"]}
+
+
 def _handle_escalate(client, args):
     log_action("escalate", args["user_id"], args["explanation"], actor="plixa-judgment-agent")
     return {"status": "escalated"}
@@ -162,6 +208,7 @@ HANDLERS = {
     "disableAccount": _handle_disable_account,
     "revokeSessions": _handle_revoke_sessions,
     "removeGroupMemberships": _handle_remove_group_memberships,
+    "requestAccess": _handle_request_access,
     "escalateToHuman": _handle_escalate,
 }
 
@@ -200,7 +247,10 @@ def run_judgment(scenario: str, verbose: bool = True) -> str:
             args = json.loads(call.arguments)
             if verbose:
                 print(f"\n-> Calling {call.name}({args})")
-            result = HANDLERS[call.name](graph_client, args)
+            try:
+                result = HANDLERS[call.name](graph_client, args)
+            except Exception as exc:
+                result = {"error": str(exc)}
             if verbose:
                 print(f"<- {result}")
             input_items.append(
