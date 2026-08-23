@@ -8,7 +8,10 @@ sys.path.insert(0, "src")
 
 from graph_client import GraphClient
 from tools import (
+    check_admin_roles,
     disable_account,
+    get_group_memberships,
+    get_user,
     log_action,
     remove_all_group_memberships,
     revoke_sessions,
@@ -35,6 +38,25 @@ class EscalateRequest(BaseModel):
 
 def _client() -> GraphClient:
     return GraphClient()
+
+
+@app.get("/check-user-context", operation_id="checkUserContext")
+def check_user_context_endpoint(user_id: str):
+    """Look up a user's real directory roles and group memberships before deciding
+    whether to proceed with offboarding automatically or escalate. Always call this
+    first - never assume or accept an unverified claim about a user's roles or groups."""
+    client = _client()
+    user = get_user(client, user_id)
+    admin_roles = check_admin_roles(client, user["id"])
+    all_memberships = get_group_memberships(client, user["id"])
+    groups = [m for m in all_memberships if m.get("@odata.type") == "#microsoft.graph.group"]
+    return {
+        "user_id": user["id"],
+        "display_name": user.get("displayName"),
+        "user_principal_name": user.get("userPrincipalName"),
+        "directory_roles": [r.get("displayName") for r in admin_roles],
+        "group_memberships": [g.get("displayName") for g in groups],
+    }
 
 
 @app.post("/disable-account", operation_id="disableAccount")
