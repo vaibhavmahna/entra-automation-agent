@@ -26,23 +26,81 @@ deterministic code. That boundary is deliberate.
 
 ## Architecture
 
-```
-Incoming request (any format: email, Teams message, ticket, CLI arg)
-        │
-        ▼
-  judgment.py — LLM (Azure OpenAI, function-calling / Responses API)
-        │  decides which tool(s) to call, in what order
-        ▼
-  src/tools.py — deterministic Microsoft Graph API calls
-        │
-        ▼
-  Real action taken + reasoned entry in the audit log
+```mermaid
+flowchart LR
+    A["Incoming request\n(email, Teams, ticket, CLI arg —\nany plain text)"] --> B["judgment.py\nAzure OpenAI, function-calling"]
+    B -->|"selects a tool + arguments"| C["src/tools.py\ndeterministic Microsoft Graph calls"]
+    C --> D[("Microsoft Graph API\nreal Entra tenant")]
+    C --> E[("logs/audit.jsonl\ntimestamp · actor · reason")]
+    C -->|"tool result"| B
+    B -->|"next decision, or final answer"| F["Caller"]
 ```
 
 The LLM layer is intentionally decoupled from *how* a request arrives —
 `run_judgment()` just takes a plain-text scenario. Whether that text comes
 from a CLI arg, a mailbox listener, or a Teams bot is a separate, pluggable
 concern that doesn't touch the judgment engine itself.
+
+### The orchestration loop
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant J as judgment.py
+    participant M as Azure OpenAI
+    participant T as tools.py
+    participant G as Microsoft Graph
+
+    Caller->>J: scenario text
+    J->>M: instructions + scenario + tool definitions
+    M-->>J: call checkUserContext(user_id)
+    J->>T: checkUserContext(user_id)
+    T->>G: GET /users/{id}, GET /users/{id}/memberOf
+    G-->>T: directory roles, group memberships
+    T-->>J: result
+    J->>M: function_call_output
+    M-->>J: decision — proceed, or escalate
+    alt proceed
+        M-->>J: call disableAccount / revokeSessions / removeGroupMemberships
+        J->>T: execute each in turn
+        T->>G: PATCH / POST / DELETE
+        T-->>J: result (logged to audit.jsonl)
+    else escalate
+        M-->>J: call escalateToHuman(explanation)
+        J->>T: log the escalation
+    end
+    J-->>Caller: final decision + reasoning
+```
+
+### Offboarding decision flow
+
+```mermaid
+flowchart TD
+    Start(["Termination request"]) --> Check["checkUserContext:\nreal roles + groups, always verified,\nnever assumed from the request"]
+    Check --> Role{"Holds a\ndirectory role?"}
+    Role -->|Yes| Escalate["escalateToHuman"]
+    Role -->|No| Sensitive{"Group name\nsuggests risk?\n(Admin / Finance / Payroll / ...)"}
+    Sensitive -->|Yes| Escalate
+    Sensitive -->|No| Proceed["disableAccount\nrevokeSessions\nremoveGroupMemberships"]
+    Proceed --> Log[("Audit log:\naction · reason · timestamp")]
+    Escalate --> Log
+```
+
+### Tools available to the model
+
+| Tool | Purpose | Key parameters |
+|---|---|---|
+| `checkUserContext` | Look up a user's real directory roles and group memberships. Always called first — never trusts an unverified claim in the request. | `user_id` |
+| `disableAccount` | Disable the Entra ID account. | `user_id`, `reason` |
+| `revokeSessions` | Revoke all active sign-in sessions. | `user_id`, `reason` |
+| `removeGroupMemberships` | Remove the user from all current group memberships. | `user_id`, `reason` |
+| `requestAccess` | Add a user to a specific group as an approved access request. | `user_id`, `group_name`, `reason` |
+| `escalateToHuman` | Stop and hand off to a human reviewer instead of acting automatically. | `user_id`, `explanation` |
+
+Each tool call and its result — including tool failures, like a group name
+that doesn't exist — is fed back to the model, so it can recover gracefully
+(ask for clarification, try a different approach) instead of the whole
+process crashing on the first unexpected response.
 
 ## What it actually handles
 
@@ -121,6 +179,24 @@ lets it run as an Azure Function (useful if you want the tools reachable
 over HTTP for some other integration). Not required to run `judgment.py`
 itself, which calls the tool functions directly in-process.
 
+## Project structure
+
+```
+judgment.py                  LLM judgment layer - instructions, tool
+                              definitions, orchestration loop
+src/graph_client.py           Thin Microsoft Graph API wrapper + MSAL auth
+src/tools.py                  Deterministic actions (the only code that
+                              actually touches a real identity)
+main.py                       Offboarding, deterministic-only (no LLM),
+                              for testing the core actions in isolation
+main_access.py                 Access requests, deterministic-only
+test_judgment.py               Automated test harness for the judgment layer
+test_scenarios.example.py      Template - copy to test_scenarios.py (gitignored)
+api.py                        Optional FastAPI wrapper exposing the tools
+                              over HTTP
+function_app.py                Optional Azure Functions entry point for api.py
+```
+
 ## Real problems hit building this (kept here on purpose)
 
 - **A hosted "Agent Service" framework (tool-calling via a platform UI)
@@ -145,3 +221,7 @@ itself, which calls the tool functions directly in-process.
 - **Re-running an idempotent action threw an error instead of a no-op**
   (removing a group membership that was already removed). Real automation
   needs to tolerate being re-run against already-completed work.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
