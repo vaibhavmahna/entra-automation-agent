@@ -1,10 +1,12 @@
 import json
+import logging
 import os
 from datetime import datetime, timezone
 
 from graph_client import GraphClient
 
 LOG_PATH = os.path.join(os.path.dirname(__file__), "..", "logs", "audit.jsonl")
+logger = logging.getLogger("plixa.audit")
 
 
 def get_user(client: GraphClient, identifier: str) -> dict:
@@ -67,7 +69,6 @@ def add_group_membership(client: GraphClient, user_id: str, group_id: str) -> No
 
 
 def log_action(action: str, user_id: str, reason: str, actor: str = "plixa-offboarding-agent") -> None:
-    os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "action": action,
@@ -75,5 +76,17 @@ def log_action(action: str, user_id: str, reason: str, actor: str = "plixa-offbo
         "actor": actor,
         "reason": reason,
     }
-    with open(LOG_PATH, "a") as f:
-        f.write(json.dumps(entry) + "\n")
+    line = json.dumps(entry)
+
+    # Always log via the standard logging module - Azure Functions forwards this
+    # to Application Insights automatically, which is the durable audit trail in
+    # the cloud (the deployed filesystem is read-only under Run-From-Package).
+    logger.info("audit: %s", line)
+
+    # Also write locally when possible, for convenience during local development.
+    try:
+        os.makedirs(os.path.dirname(LOG_PATH), exist_ok=True)
+        with open(LOG_PATH, "a") as f:
+            f.write(line + "\n")
+    except OSError:
+        pass
