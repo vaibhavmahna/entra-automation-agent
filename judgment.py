@@ -265,8 +265,10 @@ def run_judgment(scenario: str, verbose: bool = True) -> str:
 
 
 if __name__ == "__main__":
-    scenario = sys.argv[1] if len(sys.argv) > 1 else (
-        "An employee has just been terminated. Their user ID is "
-        "snd-user1@plixasandboxdemo.onmicrosoft.com. Please offboard them."
-    )
-    run_judgment(scenario)
+    if len(sys.argv) < 2:
+        raise SystemExit(
+            'Usage: python judgment.py "<scenario text>"\n'
+            'Example: python judgment.py "employee@yourtenant.onmicrosoft.com '
+            'has just been terminated. Please offboard them."'
+        )
+    run_judgment(sys.argv[1])

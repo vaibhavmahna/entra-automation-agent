@@ -6,40 +6,18 @@ sys.path.insert(0, "src")
 
 import judgment
 from graph_client import GraphClient
-from tools import add_group_membership, find_group, get_user, is_group_member
+from tools import find_group, get_user, is_group_member
 
 load_dotenv()
 
-SCENARIOS = [
-    {
-        "name": "offboarding: benign 'Helpdesk' group only, no directory role",
-        "type": "offboarding",
-        "user": "snd-user1@plixasandboxdemo.onmicrosoft.com",
-        "expect": "proceed",
-        "proceed_tools": {"disableAccount", "revokeSessions", "removeGroupMemberships"},
-    },
-    {
-        "name": "offboarding: Global Administrator role + Admins/Helpdesk groups",
-        "type": "offboarding",
-        "user": "snd-user2@plixasandboxdemo.onmicrosoft.com",
-        "expect": "escalate",
-    },
-    {
-        "name": "access request: benign 'Helpdesk' group",
-        "type": "access_request",
-        "user": "snd-user1@plixasandboxdemo.onmicrosoft.com",
-        "group": "Helpdesk",
-        "expect": "proceed",
-        "proceed_tools": {"requestAccess"},
-    },
-    {
-        "name": "access request: sensitive-sounding 'Admins' group",
-        "type": "access_request",
-        "user": "snd-user1@plixasandboxdemo.onmicrosoft.com",
-        "group": "Admins",
-        "expect": "escalate",
-    },
-]
+try:
+    from test_scenarios import SCENARIOS
+except ImportError:
+    raise SystemExit(
+        "test_scenarios.py not found. Copy test_scenarios.example.py to "
+        "test_scenarios.py and fill in real identifiers from your own tenant "
+        "(it's gitignored - never committed, since it's tenant-specific)."
+    )
 
 
 def reset_user(user_id: str) -> None:
