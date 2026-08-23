@@ -1,5 +1,10 @@
 # Entra Automation Agent
 
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)
+![Azure OpenAI](https://img.shields.io/badge/Azure-OpenAI-0078D4.svg)
+![Microsoft Graph](https://img.shields.io/badge/Microsoft-Graph_API-0078D4.svg)
+
 An AI agent that automates Microsoft Entra ID (Azure AD) identity operations —
 offboarding and access requests — with a real LLM judgment layer deciding
 whether to act automatically or escalate to a human, not a hardcoded rule set.
