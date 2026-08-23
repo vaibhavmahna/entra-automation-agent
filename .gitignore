@@ -5,3 +5,7 @@ __pycache__/
 venv/
 logs/*.jsonl
 .DS_Store
+local.settings.json
+.python_packages/
+bin/
+obj/
