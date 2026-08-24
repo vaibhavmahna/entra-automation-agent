@@ -121,6 +121,44 @@ process crashing on the first unexpected response.
 Both run through the same engine, the same tool-calling pattern, and log to
 the same audit trail.
 
+## Mailbox connector
+
+`mailbox_connector.py` polls a shared mailbox for new messages and feeds each
+one's body directly into `run_judgment()` — turning this from "you have to
+manually type a scenario" into a real trigger-to-action pipeline. It's
+deliberately a thin, separate piece: the judgment engine doesn't know or
+care that its input came from an email rather than a CLI arg.
+
+**Setup requires a separate app registration from the identity one**, since
+it needs a completely different permission (`Mail.ReadWrite`, Application)
+and ideally lives in whichever tenant the mailbox is actually in:
+
+1. Register a new app, add `Mail.ReadWrite` (Application permission), grant
+   admin consent.
+2. **Restrict it to one mailbox** with an Exchange Application Access Policy
+   — otherwise `Mail.ReadWrite` grants access to *every* mailbox in the
+   tenant, which is far more than this needs:
+   ```powershell
+   Connect-ExchangeOnline
+   # PolicyScopeGroupId needs a security-principal - a single mailbox isn't
+   # one, so create a one-member mail-enabled security group first:
+   New-DistributionGroup -Name "MailboxConnectorScope" -Type Security -Members your-shared-mailbox@yourtenant.com
+   New-ApplicationAccessPolicy -AppId <mail-app-client-id> -PolicyScopeGroupId MailboxConnectorScope -AccessRight RestrictAccess -Description "Restrict mailbox connector to one mailbox"
+   ```
+3. Add `MAIL_TENANT_ID`, `MAIL_CLIENT_ID`, `MAIL_CLIENT_SECRET`, `MAIL_MAILBOX`
+   to `.env`.
+
+Run it once (checks for unread mail, processes, exits) or continuously:
+
+```bash
+python mailbox_connector.py --once
+python mailbox_connector.py            # polls every 60s until stopped
+```
+
+A message is only marked read after `run_judgment()` completes without
+raising — an exception leaves it unread so it's retried next poll, rather
+than silently treating a crash as "handled."
+
 ## Setup
 
 ```bash
