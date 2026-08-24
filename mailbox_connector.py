@@ -39,6 +39,13 @@ def mark_as_read(client: GraphClient, mailbox: str, message_id: str) -> None:
     client.patch(f"/users/{mailbox}/messages/{message_id}", {"isRead": True})
 
 
+def flag_for_review(client: GraphClient, mailbox: str, message_id: str) -> None:
+    """Flag a message so a human notices it needs review - used when the
+    agent escalates, since otherwise an escalation logs quietly and nobody
+    finds out."""
+    client.patch(f"/users/{mailbox}/messages/{message_id}", {"flag": {"flagStatus": "flagged"}})
+
+
 def poll_once(verbose: bool = True) -> int:
     """Check the mailbox once for unread messages, run each through the
     judgment engine, and mark handled ones read. Returns how many were processed."""
@@ -56,10 +63,15 @@ def poll_once(verbose: bool = True) -> int:
             print(f"\n=== New message from {sender}: {subject} ===")
 
         try:
-            judgment.run_judgment(scenario, verbose=verbose)
+            result = judgment.run_judgment(scenario, verbose=verbose)
         except Exception as exc:
             print(f"Error processing message {msg['id']}, leaving unread for retry: {exc}")
             continue
+
+        if result.escalated:
+            flag_for_review(client, mailbox, msg["id"])
+            if verbose:
+                print("(flagged - escalated to a human, needs review)")
 
         # Only mark read after a successful run - escalating is a normal,
         # successful outcome; an exception means something needs a look.

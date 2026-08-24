@@ -1,10 +1,21 @@
 import json
 import os
 import sys
+from dataclasses import dataclass, field
 
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 from dotenv import load_dotenv
 from openai import OpenAI
+
+
+@dataclass
+class JudgmentResult:
+    final_text: str
+    tools_called: list = field(default_factory=list)
+
+    @property
+    def escalated(self) -> bool:
+        return "escalateToHuman" in self.tools_called
 
 sys.path.insert(0, "src")
 
@@ -70,6 +81,12 @@ group and there is no ambiguity about which group is meant.
 
 When you decide to escalate (either kind of request), call escalateToHuman
 with a clear explanation of what you found and why it needs human attention.
+
+Proceeding and escalating are mutually exclusive for a single request - never
+do both. If you've already completed the action (disableAccount/revokeSessions/
+removeGroupMemberships, or requestAccess), do not also call escalateToHuman
+afterward for the same request. Decide once, based on checkUserContext's
+result, before taking any action - not after.
 
 Always be conservative - if in doubt, escalate rather than act automatically."""
 
@@ -218,12 +235,13 @@ def _openai_client() -> OpenAI:
     return OpenAI(base_url=os.environ["AZURE_OPENAI_ENDPOINT"], api_key=token_provider)
 
 
-def run_judgment(scenario: str, verbose: bool = True) -> str:
+def run_judgment(scenario: str, verbose: bool = True) -> JudgmentResult:
     openai_client = _openai_client()
     graph_client = GraphClient()
     deployment = os.environ["AZURE_OPENAI_DEPLOYMENT"]
 
     input_items = [{"role": "user", "content": scenario}]
+    tools_called = []
 
     for _ in range(10):
         response = openai_client.responses.create(
@@ -239,12 +257,13 @@ def run_judgment(scenario: str, verbose: bool = True) -> str:
             final_text = next((item.content[0].text for item in response.output if item.type == "message"), "")
             if verbose:
                 print(f"\nFinal response:\n{final_text}")
-            return final_text
+            return JudgmentResult(final_text, tools_called)
 
         input_items += response.output
 
         for call in function_calls:
             args = json.loads(call.arguments)
+            tools_called.append(call.name)
             if verbose:
                 print(f"\n-> Calling {call.name}({args})")
             try:
@@ -261,7 +280,7 @@ def run_judgment(scenario: str, verbose: bool = True) -> str:
                 }
             )
 
-    return "Stopped after 10 turns without a final decision."
+    return JudgmentResult("Stopped after 10 turns without a final decision.", tools_called)
 
 
 if __name__ == "__main__":
