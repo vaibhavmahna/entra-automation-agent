@@ -1,4 +1,5 @@
 import sys
+import time
 
 from dotenv import load_dotenv
 
@@ -28,12 +29,18 @@ def reset_user(user_id: str) -> None:
 
 def ensure_not_member(user_id: str, group_name: str) -> None:
     """Remove the user from the group first so an access-request 'proceed' scenario
-    starts clean each trial (otherwise it's a no-op 'already_member' on repeat runs)."""
+    starts clean each trial (otherwise it's a no-op 'already_member' on repeat runs).
+    Graph API's directory reads can lag slightly behind a write, so poll briefly
+    until the removal is actually visible rather than racing the next trial."""
     client = GraphClient()
     user = get_user(client, user_id)
     group = find_group(client, group_name)
     if is_group_member(client, user["id"], group["id"]):
         client.delete(f"/groups/{group['id']}/members/{user['id']}/$ref", ignore_404=True)
+        for _ in range(10):
+            if not is_group_member(client, user["id"], group["id"]):
+                break
+            time.sleep(1)
 
 
 def build_scenario_text(scenario) -> str:

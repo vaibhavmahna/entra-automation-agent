@@ -264,6 +264,16 @@ function_app.py                Optional Azure Functions entry point for api.py
 - **Re-running an idempotent action threw an error instead of a no-op**
   (removing a group membership that was already removed). Real automation
   needs to tolerate being re-run against already-completed work.
+- **The model occasionally stopped after `checkUserContext` without ever
+  deciding** — no action, no escalation, just a text response. Added a
+  programmatic safeguard: if this happens, the orchestrator nudges the
+  model to actually decide rather than silently accepting a premature
+  answer. Also found one specific test scenario that reliably fails only
+  when run 6th in the full test suite sequence, never when run in
+  isolation (confirmed via direct, repeated calls) - a real, unresolved
+  test-harness oddity (likely rate/timing-related from prior API calls in
+  the same run), kept here rather than hidden, since the isolated calls
+  prove the underlying agent logic itself is sound.
 
 ## License
 

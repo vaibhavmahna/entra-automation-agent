@@ -88,6 +88,11 @@ removeGroupMemberships, or requestAccess), do not also call escalateToHuman
 afterward for the same request. Decide once, based on checkUserContext's
 result, before taking any action - not after.
 
+checkUserContext is never the final step. After calling it, you must always
+follow up with either the appropriate action tool(s) or escalateToHuman
+before giving your final answer - never stop and respond after only checking
+context, with no tool call made to act on what you found.
+
 Always be conservative - if in doubt, escalate rather than act automatically."""
 
 TOOLS = [
@@ -229,6 +234,8 @@ HANDLERS = {
     "escalateToHuman": _handle_escalate,
 }
 
+DECISION_TOOLS = {"disableAccount", "revokeSessions", "removeGroupMemberships", "requestAccess", "escalateToHuman"}
+
 
 def _openai_client() -> OpenAI:
     token_provider = get_bearer_token_provider(DefaultAzureCredential(), "https://ai.azure.com/.default")
@@ -242,6 +249,8 @@ def run_judgment(scenario: str, verbose: bool = True) -> JudgmentResult:
 
     input_items = [{"role": "user", "content": scenario}]
     tools_called = []
+    nudges_used = 0
+    max_nudges = 2
 
     for _ in range(10):
         response = openai_client.responses.create(
@@ -254,6 +263,26 @@ def run_judgment(scenario: str, verbose: bool = True) -> JudgmentResult:
         function_calls = [item for item in response.output if item.type == "function_call"]
 
         if not function_calls:
+            decision_made = any(t in DECISION_TOOLS for t in tools_called)
+            if not decision_made and tools_called and nudges_used < max_nudges:
+                # Model checked context but stopped without deciding - a real,
+                # occasional reliability gap this project hit in testing.
+                # Nudge it rather than silently accepting a premature answer.
+                nudges_used += 1
+                if verbose:
+                    print("\n(stopped without deciding - nudging to actually decide)")
+                input_items += response.output
+                input_items.append({
+                    "role": "user",
+                    "content": (
+                        "You've checked context but haven't made a decision yet. "
+                        "Based on what checkUserContext returned, either proceed "
+                        "with the appropriate action tool(s) or call "
+                        "escalateToHuman now."
+                    ),
+                })
+                continue
+
             final_text = next((item.content[0].text for item in response.output if item.type == "message"), "")
             if verbose:
                 print(f"\nFinal response:\n{final_text}")
